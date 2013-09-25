@@ -24,23 +24,23 @@
  * 
  */
 
-package org.jfree.graphics2d.demo;
+package org.jfree.graphics2d.svg;
+
+import org.junit.Test;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 
 /**
  * A basic test class for writing to a BufferedImage via Graphics2D.  This is
  * used as a reference implementation.
  */
-public class BufferedImageDemo {
+public class SVGGraphics2DTest {
     
     /**
      * Starting point for the demo.
@@ -49,11 +49,10 @@ public class BufferedImageDemo {
      * 
      * @throws IOException 
      */
-    public static void main(String[] args) throws IOException {
-        BufferedImage image = new BufferedImage(600, 400, 
-                BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2 = image.createGraphics();
-        ImageIcon icon = new ImageIcon(BufferedImageDemo.class.getResource("jfree_chart_1.jpg"));
+    @Test
+    public void testGraphics2D() throws IOException {
+        SVGGraphics2D g2 = new SVGGraphics2D(600, 400);
+        ImageIcon icon = new ImageIcon(SVGGraphics2DTest.class.getResource("jfree_chart_1.jpg"));
         g2.rotate(Math.PI / 12);
         g2.setStroke(new BasicStroke(2.0f));
         g2.setPaint(Color.WHITE);
@@ -61,6 +60,11 @@ public class BufferedImageDemo {
         g2.setPaint(Color.RED);
         g2.draw(new Rectangle(0, 0, 600, 400));
         g2.drawImage(icon.getImage(), 10, 20, null);
-        ImageIO.write(image, "png", new File("image-test.png"));
+        FileOutputStream fileOutputStream = new FileOutputStream(new File("target/testGraphics2D.svg"));
+        try {
+            fileOutputStream.write(g2.getSVGDocument().getBytes());
+        } finally {
+            fileOutputStream.close();
+        }
     }
 }
