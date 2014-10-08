@@ -32,8 +32,8 @@
   </build>
   <parent>
     <artifactId>jfreesvg-platform</artifactId>
-    <groupId>jfree</groupId>
-    <version>1.9</version>
+    <groupId>org.jfree</groupId>
+    <version>2.1</version>
     <relativePath>../</relativePath>
   </parent>
   <properties>

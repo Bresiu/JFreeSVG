@@ -7,22 +7,22 @@
  * Project Info:  http://www.jfree.org/jfreesvg/index.html
  * 
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published by
+ * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
+ * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU Affero General Public License
+ * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * 
  * [Oracle and Java are registered trademarks of Oracle and/or its affiliates. 
  * Other names may be trademarks of their respective owners.]
  * 
- * If you do not wish to be bound by the terms of the AGPL, an alternative
+ * If you do not wish to be bound by the terms of the GPL, an alternative
  * commercial license can be purchased.  For details, please see visit the
  * JFreeSVG home page:
  * 
@@ -177,6 +177,36 @@ public final class SVGHints {
      * @since 1.9
      */
     public static final SVGHints.Key KEY_ELEMENT_TITLE = new SVGHints.Key(6);
+
+    /**
+     * The key for the hint that controls whether strings are rendered as
+     * characters or vector graphics (implemented using {@code TextLayout}).  
+     * The latter will result in larger output files but avoids problems with
+     * fonts not being available for the viewer.  Valid hint values are 
+     * {@link #VALUE_DRAW_STRING_TYPE_STANDARD} and 
+     * {@link #VALUE_DRAW_STRING_TYPE_VECTOR}.
+     * 
+     * @since 2.0
+     */
+    public static final SVGHints.Key KEY_DRAW_STRING_TYPE = new SVGHints.Key(7);
+    
+    /**
+     * Hint value for {@code KEY_DRAW_STRING_TYPE} to specify that strings
+     * should be written to the output using standard SVG text elements.
+     * 
+     * @since 2.0
+     */
+    public static final Object VALUE_DRAW_STRING_TYPE_STANDARD 
+            = "VALUE_DRAW_STRING_TYPE_STANDARD";
+    
+    /**
+     * Hint value for {@code KEY_DRAW_STRING_TYPE} to say that strings
+     * should be written to the output using vector graphics primitives.
+     * 
+     * @since 2.0
+     */
+    public static final Object VALUE_DRAW_STRING_TYPE_VECTOR
+            = "VALUE_DRAW_STRING_TYPE_VECTOR";
     
     /**
      * A list of keys that are treated as synonyms for KEY_BEGIN_GROUP
@@ -204,6 +234,10 @@ public final class SVGHints {
             beginGroupKeys.add(getOrsonChartsBeginElementKey());
             endGroupKeys.add(getOrsonChartsEndElementKey());
             elementTitleKeys.add(getOrsonChartsElementTitleKey());
+        }
+        if (isJFreeChartOnClasspath()) {
+            beginGroupKeys.add(getJFreeChartBeginElementKey());
+            endGroupKeys.add(getJFreeChartEndElementKey());
         }
     }
     
@@ -425,12 +459,30 @@ public final class SVGHints {
         return (getOrsonChartsBeginElementKey() != null);
     }
     
-    private static RenderingHints.Key getOrsonChartsBeginElementKey() {
-        Class<?> renderingHintsClass;
+    /**
+     * Returns <code>true</code> if JFreeChart (1.0.18 or later) is on 
+     * the classpath, and <code>false</code> otherwise.  This method is used to
+     * auto-register keys from JFreeChart that should translate to the 
+     * behaviour of {@link SVGHints#KEY_BEGIN_GROUP} and 
+     * {@link SVGHints#KEY_END_GROUP}.
+     * 
+     * <p>The JFreeChart library can be found at <a href="http://www.jfree.org/jfreechart/">
+     * http://www.jfree.org/jfreechart/</a>.
+     * 
+     * @return A boolean.
+     * 
+     * @since 2.0
+     */
+    private static boolean isJFreeChartOnClasspath() {
+        return (getJFreeChartBeginElementKey() != null);
+    }
+
+    private static RenderingHints.Key fetchKey(String className, 
+            String fieldName) {
+        Class<?> hintsClass;
         try {
-            renderingHintsClass 
-                    = Class.forName("com.orsoncharts.Chart3DHints");
-            Field f = renderingHintsClass.getDeclaredField("KEY_BEGIN_ELEMENT");
+            hintsClass = Class.forName(className);
+            Field f = hintsClass.getDeclaredField(fieldName);
             return (RenderingHints.Key) f.get(null);
         } catch (ClassNotFoundException e) {
             return null;
@@ -443,46 +495,26 @@ public final class SVGHints {
         } catch (IllegalAccessException ex) {
             return null;
         }
+    }
+    
+    private static RenderingHints.Key getOrsonChartsBeginElementKey() {
+        return fetchKey("com.orsoncharts.Chart3DHints", "KEY_BEGIN_ELEMENT");
     }
 
     private static RenderingHints.Key getOrsonChartsEndElementKey() {
-        Class<?> renderingHintsClass;
-        try {
-            renderingHintsClass 
-                    = Class.forName("com.orsoncharts.Chart3DHints");
-            Field f = renderingHintsClass.getDeclaredField("KEY_END_ELEMENT");
-            return (RenderingHints.Key) f.get(null);
-        } catch (ClassNotFoundException e) {
-            return null;
-        } catch (NoSuchFieldException ex) {
-            return null;
-        } catch (SecurityException ex) {
-            return null;
-        } catch (IllegalArgumentException ex) {
-            return null;
-        } catch (IllegalAccessException ex) {
-            return null;
-        }
+        return fetchKey("com.orsoncharts.Chart3DHints", "KEY_END_ELEMENT");
     }
 
     private static RenderingHints.Key getOrsonChartsElementTitleKey() {
-        Class<?> renderingHintsClass;
-        try {
-            renderingHintsClass 
-                    = Class.forName("com.orsoncharts.Chart3DHints");
-            Field f = renderingHintsClass.getDeclaredField("KEY_ELEMENT_TITLE");
-            return (RenderingHints.Key) f.get(null);
-        } catch (ClassNotFoundException e) {
-            return null;
-        } catch (NoSuchFieldException ex) {
-            return null;
-        } catch (SecurityException ex) {
-            return null;
-        } catch (IllegalArgumentException ex) {
-            return null;
-        } catch (IllegalAccessException ex) {
-            return null;
-        }
+        return fetchKey("com.orsoncharts.Chart3DHints", "KEY_ELEMENT_TITLE");
+    }
+
+    private static RenderingHints.Key getJFreeChartBeginElementKey() {
+        return fetchKey("org.jfree.chart.ChartHints", "KEY_BEGIN_ELEMENT");
+    }
+
+    private static RenderingHints.Key getJFreeChartEndElementKey() {
+        return fetchKey("org.jfree.chart.ChartHints", "KEY_END_ELEMENT");
     }
 
     /**
@@ -529,6 +561,10 @@ public final class SVGHints {
                     return true; // the value is ignored
                 case 6: // KEY_ELEMENT_TITLE
                     return val instanceof String;
+                case 7:
+                    return val == null 
+                            || VALUE_DRAW_STRING_TYPE_STANDARD.equals(val)
+                            || VALUE_DRAW_STRING_TYPE_VECTOR.equals(val);
                 default:
                     throw new RuntimeException("Not possible!");
             }
