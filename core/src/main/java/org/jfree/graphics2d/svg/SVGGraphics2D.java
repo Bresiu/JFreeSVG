@@ -42,6 +42,8 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.Image;
+import java.awt.LinearGradientPaint;
+import java.awt.MultipleGradientPaint.CycleMethod;
 import java.awt.Paint;
 import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
@@ -79,6 +81,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -87,6 +90,7 @@ import javax.xml.bind.DatatypeConverter;
 import org.jfree.graphics2d.Args;
 import org.jfree.graphics2d.GradientPaintKey;
 import org.jfree.graphics2d.GraphicsUtils;
+import org.jfree.graphics2d.LinearGradientPaintKey;
 import org.jfree.graphics2d.RadialGradientPaintKey;
 
 /**
@@ -141,12 +145,15 @@ import org.jfree.graphics2d.RadialGradientPaintKey;
  */
 public final class SVGGraphics2D extends Graphics2D {
 
+    /** The prefix for keys used to identify clip paths. */
+    private static final String CLIP_KEY_PREFIX = "clip-";
+    
+    private final int width;
+    
+    private final int height;
+    
     /** Rendering hints (see SVGHints). */
-    private RenderingHints hints;
-    
-    private int width;
-    
-    private int height;
+    private final RenderingHints hints;
     
     /** 
      * The number of decimal places to use when writing the matrix values
@@ -171,29 +178,44 @@ public final class SVGGraphics2D extends Graphics2D {
     private DecimalFormat geometryFormat;
     
     /** The buffer that accumulates the SVG output. */
-    private StringBuilder sb;
+    private final StringBuilder sb;
 
+    /** 
+     * A prefix for the keys used in the DEFS element.  This can be used to 
+     * ensure that the keys are unique when creating more than one SVG element
+     * for a single HTML page.
+     */
+    private String defsKeyPrefix = "";
+    
     /** 
      * A map of all the gradients used, and the corresponding id.  When 
      * generating the SVG file, all the gradient paints used must be defined
      * in the defs element.
      */
-    private Map<GradientPaintKey, String> gradientPaints 
+    private final Map<GradientPaintKey, String> gradientPaints 
             = new HashMap<GradientPaintKey, String>();
+    
+    /** 
+     * A map of all the linear gradients used, and the corresponding id.  When 
+     * generating the SVG file, all the linear gradient paints used must be 
+     * defined in the defs element.
+     */
+    private final Map<LinearGradientPaintKey, String> linearGradientPaints 
+            = new HashMap<LinearGradientPaintKey, String>();
     
     /** 
      * A map of all the radial gradients used, and the corresponding id.  When 
      * generating the SVG file, all the radial gradient paints used must be 
      * defined in the defs element.
      */
-    private Map<RadialGradientPaintKey, String> radialGradientPaints
+    private final Map<RadialGradientPaintKey, String> radialGradientPaints
             = new HashMap<RadialGradientPaintKey, String>();
     
     /**
      * A list of the registered clip regions.  These will be written to the
      * DEFS element.
      */
-    private List<String> clipPaths = new ArrayList<String>();
+    private final List<String> clipPaths = new ArrayList<String>();
     
     /** 
      * The filename prefix for images that are referenced rather than
@@ -214,7 +236,7 @@ public final class SVGGraphics2D extends Graphics2D {
      * After the SVG is generated, the caller can make use of this list to
      * write PNG files if they don't already exist.  
      */
-    private List<ImageElement> imageElements;
+    private final List<ImageElement> imageElements;
     
     /** The user clip (can be null). */
     private Shape clip;
@@ -232,7 +254,16 @@ public final class SVGGraphics2D extends Graphics2D {
     private Composite composite = AlphaComposite.getInstance(
             AlphaComposite.SRC_OVER, 1.0f);
     
+    /** The current stroke. */
     private Stroke stroke = new BasicStroke(1.0f);
+    
+    /** 
+     * The width of the SVG stroke to use when the user supplies a
+     * BasicStroke with a width of 0.0 (in this case the Java specificatin
+     * says "If width is set to 0.0f, the stroke is rendered as the thinnest 
+     * possible line for the target device and the antialias hint setting."
+     */
+    private double zeroStrokeWidth;
     
     /** The last font that was set. */
     private Font font;
@@ -244,8 +275,8 @@ public final class SVGGraphics2D extends Graphics2D {
     private Color background = Color.BLACK;
 
     /** A hidden image used for font metrics. */
-    private BufferedImage fmImage = new BufferedImage(10, 10, 
-            BufferedImage.TYPE_INT_RGB);;
+    private final BufferedImage fmImage = new BufferedImage(10, 10, 
+            BufferedImage.TYPE_INT_RGB);
 
     /**
      * An instance that is lazily instantiated in drawLine and then 
@@ -291,7 +322,7 @@ public final class SVGGraphics2D extends Graphics2D {
     private GraphicsConfiguration deviceConfiguration;
 
     /** A set of element IDs. */
-    private Set<String> elementIDs;
+    private final Set<String> elementIDs;
     
     /**
      * Creates a new instance with the specified width and height.
@@ -302,12 +333,14 @@ public final class SVGGraphics2D extends Graphics2D {
     public SVGGraphics2D(int width, int height) {
         this.width = width;
         this.height = height;
+        this.defsKeyPrefix = "";
         this.clip = null;
         this.imageElements = new ArrayList<ImageElement>();
         this.filePrefix = "image-";
         this.fileSuffix = ".png";
         this.font = new Font("SansSerif", Font.PLAIN, 12);
         this.fontMapper = new StandardFontMapper();
+        this.zeroStrokeWidth = 0.1;
         this.sb = new StringBuilder();
         this.hints = new RenderingHints(SVGHints.KEY_IMAGE_HANDLING, 
                 SVGHints.VALUE_IMAGE_HANDLING_EMBED);
@@ -339,6 +372,32 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     public int getHeight() {
         return this.height;
+    }
+    
+    /**
+     * Returns the prefix used for all keys in the DEFS element.  The default
+     * value is the empty string.
+     * 
+     * @return The prefix string (never <code>null</code>).
+     * 
+     * @since 1.9
+     */
+    public String getDefsKeyPrefix() {
+        return this.defsKeyPrefix;
+    }
+    
+    /**
+     * Sets the prefix that will be used for all keys in the DEFS element.
+     * If required, this must be set immediately after construction (before any 
+     * content generation methods have been called).
+     * 
+     * @param prefix  the prefix (<code>null</code> not permitted).
+     * 
+     * @since 1.9
+     */
+    public void setDefsKeyPrefix(String prefix) {
+        Args.nullNotPermitted(prefix, "prefix");
+        this.defsKeyPrefix = prefix;
     }
     
     /**
@@ -472,6 +531,38 @@ public final class SVGGraphics2D extends Graphics2D {
         Args.nullNotPermitted(suffix, "suffix");
         this.fileSuffix = suffix;
     }
+    
+    /**
+     * Returns the width to use for the SVG stroke when the AWT stroke
+     * specified has a zero width (the default value is <code>0.1</code>.  In 
+     * the Java specification for <code>BasicStroke</code> it states "If width 
+     * is set to 0.0f, the stroke is rendered as the thinnest possible 
+     * line for the target device and the antialias hint setting."  We don't 
+     * have a means to implement that accurately since we must specify a fixed
+     * width.
+     * 
+     * @return The width.
+     * 
+     * @since 1.9
+     */
+    public double getZeroStrokeWidth() {
+        return this.zeroStrokeWidth;
+    }
+    
+    /**
+     * Sets the width to use for the SVG stroke when the current AWT stroke
+     * has a width of 0.0.
+     * 
+     * @param width  the new width (must be 0 or greater).
+     * 
+     * @since 1.9
+     */
+    public void setZeroStrokeWidth(double width) {
+        if (width < 0.0) {
+            throw new IllegalArgumentException("Width cannot be negative.");
+        }
+        this.zeroStrokeWidth = width;
+    }
  
     /**
      * Returns the device configuration associated with this
@@ -551,12 +642,23 @@ public final class SVGGraphics2D extends Graphics2D {
             String ref = this.gradientPaints.get(key);
             if (ref == null) {
                 int count = this.gradientPaints.keySet().size();
-                String id = "gp" + count;
+                String id = this.defsKeyPrefix + "gp" + count;
                 this.elementIDs.add(id);
                 this.gradientPaints.put(key, id);
                 this.gradientPaintRef = id;
             } else {
                 this.gradientPaintRef = ref;
+            }
+        } else if (paint instanceof LinearGradientPaint) {
+            LinearGradientPaint lgp = (LinearGradientPaint) paint;
+            LinearGradientPaintKey key = new LinearGradientPaintKey(lgp);
+            String ref = this.linearGradientPaints.get(key);
+            if (ref == null) {
+                int count = this.linearGradientPaints.keySet().size();
+                String id = this.defsKeyPrefix + "lgp" + count;
+                this.elementIDs.add(id);
+                this.linearGradientPaints.put(key, id);
+                this.gradientPaintRef = id;
             }
         } else if (paint instanceof RadialGradientPaint) {
             RadialGradientPaint rgp = (RadialGradientPaint) paint;
@@ -564,7 +666,7 @@ public final class SVGGraphics2D extends Graphics2D {
             String ref = this.radialGradientPaints.get(key);
             if (ref == null) {
                 int count = this.radialGradientPaints.keySet().size();
-                String id = "rgp" + count;
+                String id = this.defsKeyPrefix + "rgp" + count;
                 this.elementIDs.add(id);
                 this.radialGradientPaints.put(key, id);
                 this.gradientPaintRef = id;
@@ -708,24 +810,39 @@ public final class SVGGraphics2D extends Graphics2D {
      * Sets the value for a hint.  See the {@link SVGHints} class for 
      * information about the hints that can be used with this implementation.
      * 
-     * @param hintKey  the hint key.
+     * @param hintKey  the hint key (<code>null</code> not permitted).
      * @param hintValue  the hint value.
      * 
      * @see #getRenderingHint(java.awt.RenderingHints.Key) 
      */
     @Override
     public void setRenderingHint(RenderingHints.Key hintKey, Object hintValue) {
+        if (hintKey == null) {
+            throw new NullPointerException("Null 'hintKey' not permitted.");
+        }
         // KEY_BEGIN_GROUP and KEY_END_GROUP are handled as special cases that
         // never get stored in the hints map...
         if (SVGHints.isBeginGroupKey(hintKey)) {
             String groupId = null;
             String ref = null;
+            List<Entry> otherKeysAndValues = null;
             if (hintValue instanceof String) {
                 groupId = (String) hintValue;
              } else if (hintValue instanceof Map) {
                 Map hintValueMap = (Map) hintValue;
                 groupId = (String) hintValueMap.get("id");
                 ref = (String) hintValueMap.get("ref");
+                for (final Object obj: hintValueMap.entrySet()) {
+                   final Entry e = (Entry) obj;
+                   final Object key = e.getKey();
+                   if ("id".equals(key) || "ref".equals(key)) {
+                      continue;
+                   }
+                   if (otherKeysAndValues == null) {
+                      otherKeysAndValues = new ArrayList<Entry>();
+                   }
+                   otherKeysAndValues.add(e);
+                }
             }
             this.sb.append("<g");
             if (groupId != null) {
@@ -741,9 +858,20 @@ public final class SVGGraphics2D extends Graphics2D {
                 this.sb.append(" jfreesvg:ref=\"");
                 this.sb.append(SVGUtils.escapeForXML(ref)).append("\"");
             }
+            if (otherKeysAndValues != null) {
+               for (final Entry e: otherKeysAndValues) {
+                    this.sb.append(" ").append(e.getKey()).append("=\"");
+                    this.sb.append(SVGUtils.escapeForXML(String.valueOf(
+                            e.getValue()))).append("\"");
+               }
+            }
             this.sb.append(">");
         } else if (SVGHints.isEndGroupKey(hintKey)) {
             this.sb.append("</g>\n");
+        } else if (SVGHints.isElementTitleKey(hintKey) && (hintValue != null)) {
+            this.sb.append("<title>");
+            this.sb.append(SVGUtils.escapeForXML(String.valueOf(hintValue)));
+            this.sb.append("</title>");     
         } else {
             this.hints.put(hintKey, hintValue);
         }
@@ -1004,6 +1132,7 @@ public final class SVGGraphics2D extends Graphics2D {
         if (this.paint instanceof Color) {
             return rgbaColorStr((Color) this.paint);
         } else if (this.paint instanceof GradientPaint 
+                || this.paint instanceof LinearGradientPaint
                 || this.paint instanceof RadialGradientPaint) {
             return "url(#" + this.gradientPaintRef + ")";
         }
@@ -1048,12 +1177,13 @@ public final class SVGGraphics2D extends Graphics2D {
      * @return A stroke style string.
      */
     private String strokeStyle() {
-        float strokeWidth = 1.0f;
+        double strokeWidth = 1.0f;
         float[] dashArray = new float[0];
         if (this.stroke instanceof BasicStroke) {
             // in fact this method doesn't get called for other stroke types
             BasicStroke bs = (BasicStroke) this.stroke;
-            strokeWidth = bs.getLineWidth();
+            strokeWidth = bs.getLineWidth() > 0.0 ? bs.getLineWidth() 
+                    : this.zeroStrokeWidth;
             dashArray = bs.getDashArray();
         }
         StringBuilder b = new StringBuilder();
@@ -1531,7 +1661,7 @@ public final class SVGGraphics2D extends Graphics2D {
             this.clipPaths.add(pathStr);
             index = this.clipPaths.size() - 1;
         }
-        return "clip-" + index;
+        return this.defsKeyPrefix + CLIP_KEY_PREFIX + index;
     }
     
     private String transformDP(double d) {
@@ -1576,6 +1706,9 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     @Override
     public void clip(Shape s) {
+        if (s instanceof Line2D) {
+            s = s.getBounds2D();
+        }
         if (this.clip == null) {
             setClip(s);
             return;
@@ -1875,7 +2008,7 @@ public final class SVGGraphics2D extends Graphics2D {
      * Draws an image at the location <code>(x, y)</code>.  Note that the 
      * <code>observer</code> is ignored.
      * 
-     * @param img  the image.
+     * @param img  the image (<code>null</code> not permitted).
      * @param x  the x-coordinate.
      * @param y  the y-coordinate.
      * @param observer  ignored.
@@ -1915,7 +2048,7 @@ public final class SVGGraphics2D extends Graphics2D {
 
         // the rendering hints control whether the image is embedded or
         // referenced...
-        Object hint = this.getRenderingHint(SVGHints.KEY_IMAGE_HANDLING);
+        Object hint = getRenderingHint(SVGHints.KEY_IMAGE_HANDLING);
         if (SVGHints.VALUE_IMAGE_HANDLING_EMBED.equals(hint)) {
             this.sb.append("<image ");
             appendOptionalElementIDFromHint(this.sb);
@@ -1965,7 +2098,7 @@ public final class SVGGraphics2D extends Graphics2D {
      * Draws an image at the location <code>(x, y)</code>.  Note that the 
      * <code>observer</code> is ignored.
      * 
-     * @param img  the image.
+     * @param img  the image (<code>null</code> not permitted).
      * @param x  the x-coordinate.
      * @param y  the y-coordinate.
      * @param bgcolor  the background color (<code>null</code> permitted).
@@ -2035,8 +2168,8 @@ public final class SVGGraphics2D extends Graphics2D {
             int sx1, int sy1, int sx2, int sy2, ImageObserver observer) {
         int w = dx2 - dx1;
         int h = dy2 - dy1;
-        BufferedImage img2 = new BufferedImage(BufferedImage.TYPE_INT_ARGB, 
-                w, h);
+        BufferedImage img2 = new BufferedImage(w, h, 
+                BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = img2.createGraphics();
         g2.drawImage(img, 0, 0, w, h, sx1, sy1, sx2, sy2, null);
         return drawImage(img2, dx1, dx2, null);
@@ -2197,14 +2330,20 @@ public final class SVGGraphics2D extends Graphics2D {
                     key.getPaint()));
             defs.append("\n");
         }
+        for (LinearGradientPaintKey key : this.linearGradientPaints.keySet()) {
+            defs.append(getLinearGradientElement(
+                    this.linearGradientPaints.get(key), key.getPaint()));
+            defs.append("\n");            
+        }
         for (RadialGradientPaintKey key : this.radialGradientPaints.keySet()) {
             defs.append(getRadialGradientElement(
                     this.radialGradientPaints.get(key), key.getPaint()));
             defs.append("\n");
         }
         for (int i = 0; i < this.clipPaths.size(); i++) {
-            StringBuilder b = new StringBuilder("<clipPath id=\"clip-")
-                    .append(i).append("\">");
+            StringBuilder b = new StringBuilder("<clipPath id=\"")
+                    .append(this.defsKeyPrefix).append(CLIP_KEY_PREFIX).append(i)
+                    .append("\">");
             b.append("<path ").append(this.clipPaths.get(i)).append("/>");
             b.append("</clipPath>").append("\n");
             defs.append(b.toString());
@@ -2255,8 +2394,6 @@ public final class SVGGraphics2D extends Graphics2D {
         return new HashSet<String>(this.elementIDs);
     }
     
-    private static final double EPSILON = 0.00000001;
-    
     /**
      * Returns an element to represent a linear gradient.  All the linear
      * gradients that are used get written to the DEFS element in the SVG.
@@ -2271,16 +2408,49 @@ public final class SVGGraphics2D extends Graphics2D {
                 .append("\" ");
         Point2D p1 = paint.getPoint1();
         Point2D p2 = paint.getPoint2();
-        boolean h = Math.abs(p1.getX() - p2.getX()) > EPSILON;
-        boolean v = Math.abs(p1.getY() - p2.getY()) > EPSILON;
-        b.append("x1=\"").append(h ? "0%" : "50%").append("\" ");
-        b.append("y1=\"").append(v ? "0%" : "50%").append("\" ");
-        b.append("x2=\"").append(h ? "100%" : "50%").append("\" ");
-        b.append("y2=\"").append(v ? "100%" : "50%").append("\">");
+        b.append("x1=\"").append(geomDP(p1.getX())).append("\" ");
+        b.append("y1=\"").append(geomDP(p1.getY())).append("\" ");
+        b.append("x2=\"").append(geomDP(p2.getX())).append("\" ");
+        b.append("y2=\"").append(geomDP(p2.getY())).append("\" ");
+        b.append("gradientUnits=\"userSpaceOnUse\">");
         b.append("<stop offset=\"0%\" style=\"stop-color: ").append(
                 rgbColorStr(paint.getColor1())).append(";\"/>");
         b.append("<stop offset=\"100%\" style=\"stop-color: ").append(
                 rgbColorStr(paint.getColor2())).append(";\"/>");
+        return b.append("</linearGradient>").toString();
+    }
+    
+    /**
+     * Returns an element to represent a linear gradient.  All the linear
+     * gradients that are used get written to the DEFS element in the SVG.
+     * 
+     * @param id  the reference id.
+     * @param paint  the gradient.
+     * 
+     * @return The SVG element.
+     */
+    private String getLinearGradientElement(String id, LinearGradientPaint paint) {
+        StringBuilder b = new StringBuilder("<linearGradient id=\"").append(id)
+                .append("\" ");
+        Point2D p1 = paint.getStartPoint();
+        Point2D p2 = paint.getEndPoint();
+        b.append("x1=\"").append(geomDP(p1.getX())).append("\" ");
+        b.append("y1=\"").append(geomDP(p1.getY())).append("\" ");
+        b.append("x2=\"").append(geomDP(p2.getX())).append("\" ");
+        b.append("y2=\"").append(geomDP(p2.getY())).append("\" ");
+        if (!paint.getCycleMethod().equals(CycleMethod.NO_CYCLE)) {
+            String sm = paint.getCycleMethod().equals(CycleMethod.REFLECT) 
+                    ? "reflect" : "repeat";
+            b.append("spreadMethod=\"").append(sm).append("\" ");
+        }
+        b.append("gradientUnits=\"userSpaceOnUse\">");
+        for (int i = 0; i < paint.getFractions().length; i++) {
+            Color c = paint.getColors()[i];
+            float fraction = paint.getFractions()[i];
+            b.append("<stop offset=\"").append(geomDP(fraction * 100))
+                    .append("%\" style=\"stop-color: ")
+                    .append(rgbColorStr(c)).append(";\"/>");
+        }
         return b.append("</linearGradient>").toString();
     }
     
@@ -2314,23 +2484,6 @@ public final class SVGGraphics2D extends Graphics2D {
             b.append("stop-color=\"").append(rgbColorStr(c)).append("\"/>");
         }
         return b.append("</radialGradient>").toString();
-    }
-    
-    /**
-     * Returns an element to represent a clip path.  All the clip paths that
-     * are used are written to the DEFS element in the SVG.
-     * 
-     * @param refID  the reference id.
-     * @param s  the clip region.
-     * 
-     * @return The SVG element.
-     */
-    private String getClipPathElement(String refID, Shape s) {
-        StringBuilder b = new StringBuilder("<clipPath id=\"").append(refID)
-                .append("\">");
-        b.append("<path ").append(getSVGPathData(new Path2D.Double(s)))
-                .append("/>");
-        return b.append("</clipPath>").toString();
     }
 
     /**
