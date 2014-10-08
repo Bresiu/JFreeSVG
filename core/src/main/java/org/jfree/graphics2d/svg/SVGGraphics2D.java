@@ -26,7 +26,6 @@
 
 package org.jfree.graphics2d.svg;
 
-import org.jfree.graphics2d.GradientPaintKey;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -69,8 +68,10 @@ import java.io.IOException;
 import java.text.AttributedCharacterIterator;
 import java.text.AttributedCharacterIterator.Attribute;
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -78,6 +79,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.imageio.ImageIO;
 import javax.xml.bind.DatatypeConverter;
+import org.jfree.graphics2d.Args;
+import org.jfree.graphics2d.GradientPaintKey;
 import org.jfree.graphics2d.GraphicsUtils;
 import org.jfree.graphics2d.RadialGradientPaintKey;
 
@@ -149,7 +152,7 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * The decimal formatter for transform matrices.
      */
-    private DecimalFormat transformFormat = new DecimalFormat("0.######");
+    private DecimalFormat transformFormat;
     
     /**
      * The number of decimal places to use when writing coordinates for
@@ -160,7 +163,7 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * The decimal formatter for coordinates of geometrical shapes.
      */
-    private DecimalFormat geometryFormat = new DecimalFormat("0.##");
+    private DecimalFormat geometryFormat;
     
     /** The buffer that accumulates the SVG output. */
     private StringBuilder sb;
@@ -188,6 +191,20 @@ public final class SVGGraphics2D extends Graphics2D {
     private List<String> clipPaths = new ArrayList<String>();
     
     /** 
+     * The filename prefix for images that are referenced rather than
+     * embedded but don't have an <code>href</code> supplied via the 
+     * {@link #KEY_IMAGE_HREF} hint.
+     */
+    private String filePrefix;
+    
+    /** 
+     * The filename suffix for images that are referenced rather than
+     * embedded but don't have an <code>href</code> supplied via the 
+     * {@link #KEY_IMAGE_HREF} hint.
+     */
+    private String fileSuffix;
+    
+    /** 
      * A list of images that are referenced but not embedded in the SVG.
      * After the SVG is generated, the caller can make use of this list to
      * write PNG files if they don't already exist.  
@@ -212,8 +229,12 @@ public final class SVGGraphics2D extends Graphics2D {
     
     private Stroke stroke = new BasicStroke(1.0f);
     
-    private Font font = new Font("SansSerif", Font.PLAIN, 12);
-    
+    /** The last font that was set. */
+    private Font font;
+
+    /** Maps font family names to alternates (or leaves them unchanged). */
+    private FontMapper fontMapper;
+        
     /** The background color, used by clearRect(). */
     private Color background = Color.BLACK;
 
@@ -264,6 +285,9 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     private GraphicsConfiguration deviceConfiguration;
 
+    /** A set of element IDs. */
+    private Set<String> elementIDs;
+    
     /**
      * Creates a new instance with the specified width and height.
      * 
@@ -275,9 +299,19 @@ public final class SVGGraphics2D extends Graphics2D {
         this.height = height;
         this.clip = null;
         this.imageElements = new ArrayList<ImageElement>();
+        this.filePrefix = "image-";
+        this.fileSuffix = ".png";
+        this.font = new Font("SansSerif", Font.PLAIN, 12);
+        this.fontMapper = new StandardFontMapper();
         this.sb = new StringBuilder();
         this.hints = new RenderingHints(SVGHints.KEY_IMAGE_HANDLING, 
                 SVGHints.VALUE_IMAGE_HANDLING_EMBED);
+        // force the formatters to use a '.' for the decimal point
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
+        this.transformFormat = new DecimalFormat("0.######", dfs);
+        this.geometryFormat = new DecimalFormat("0.##", dfs);
+        this.elementIDs = new HashSet<String>();
     }
 
     /**
@@ -323,7 +357,7 @@ public final class SVGGraphics2D extends Graphics2D {
      * matrices in the SVG output.  Values in the range 1 to 10 will be used
      * to configure a formatter to that number of decimal places, for all other
      * values we revert to the normal <code>String</code> conversion of 
-     * <coode>double</code> primitives (approximately 16 decimals places).
+     * <code>double</code> primitives (approximately 16 decimals places).
      * <p>
      * Note that there is a separate attribute to control the number of decimal
      * places for geometrical elements in the output (see 
@@ -339,8 +373,10 @@ public final class SVGGraphics2D extends Graphics2D {
             this.transformFormat = null;
             return;
         }
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
         this.transformFormat = new DecimalFormat("0." 
-                + "##########".substring(0, dp));
+                + "##########".substring(0, dp), dfs);
     }
     
     /**
@@ -376,10 +412,62 @@ public final class SVGGraphics2D extends Graphics2D {
             this.geometryFormat = null;
             return;
         }
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
         this.geometryFormat = new DecimalFormat("0." 
-                + "##########".substring(0, dp));
+                + "##########".substring(0, dp), dfs);
+    }
+    
+    /**
+     * Returns the prefix used to generate a filename for an image that is
+     * referenced from, rather than embedded in, the SVG element.
+     * 
+     * @return The file prefix (never <code>null</code>).
+     * 
+     * @since 1.5
+     */
+    public String getFilePrefix() {
+        return this.filePrefix;
+    }
+    
+    /**
+     * Sets the prefix used to generate a filename for any image that is
+     * referenced from the SVG element.
+     * 
+     * @param prefix  the new prefix (<code>null</code> not permitted).
+     * 
+     * @since 1.5
+     */
+    public void setFilePrefix(String prefix) {
+        Args.nullNotPermitted(prefix, "prefix");
+        this.filePrefix = prefix;
     }
 
+    /**
+     * Returns the suffix used to generate a filename for an image that is
+     * referenced from, rather than embedded in, the SVG element.
+     * 
+     * @return The file suffix (never <code>null</code>).
+     * 
+     * @since 1.5
+     */
+    public String getFileSuffix() {
+        return this.fileSuffix;
+    }
+    
+    /**
+     * Sets the suffix used to generate a filename for any image that is
+     * referenced from the SVG element.
+     * 
+     * @param suffix  the new prefix (<code>null</code> not permitted).
+     * 
+     * @since 1.5
+     */
+    public void setFileSuffix(String suffix) {
+        Args.nullNotPermitted(suffix, "suffix");
+        this.fileSuffix = suffix;
+    }
+ 
     /**
      * Returns the device configuration associated with this
      * <code>Graphics2D</code>.
@@ -414,6 +502,8 @@ public final class SVGGraphics2D extends Graphics2D {
         copy.setFont(getFont());
         copy.setTransform(getTransform());
         copy.setBackground(getBackground());
+        copy.setFilePrefix(getFilePrefix());
+        copy.setFileSuffix(getFileSuffix());
         return copy;
     }
 
@@ -456,8 +546,10 @@ public final class SVGGraphics2D extends Graphics2D {
             String ref = this.gradientPaints.get(key);
             if (ref == null) {
                 int count = this.gradientPaints.keySet().size();
-                this.gradientPaints.put(key, "gp" + count);
-                this.gradientPaintRef = "gp" + count;
+                String id = "gp" + count;
+                this.elementIDs.add(id);
+                this.gradientPaints.put(key, id);
+                this.gradientPaintRef = id;
             } else {
                 this.gradientPaintRef = ref;
             }
@@ -467,8 +559,10 @@ public final class SVGGraphics2D extends Graphics2D {
             String ref = this.radialGradientPaints.get(key);
             if (ref == null) {
                 int count = this.radialGradientPaints.keySet().size();
-                this.radialGradientPaints.put(key, "rgp" + count);
-                this.gradientPaintRef = "rgp" + count;
+                String id = "rgp" + count;
+                this.elementIDs.add(id);
+                this.radialGradientPaints.put(key, id);
+                this.gradientPaintRef = id;
             }
         }
     }
@@ -658,11 +752,31 @@ public final class SVGGraphics2D extends Graphics2D {
     }
 
     /**
+     * A utility method that appends an optional element id if one is 
+     * specified via the rendering hints.
+     * 
+     * @param sb  the string builder (<code>null</code> not permitted). 
+     */
+    private void appendOptionalElementIDFromHint(StringBuilder sb) {
+        String elementID = (String) this.hints.get(SVGHints.KEY_ELEMENT_ID);
+        if (elementID != null) {
+            this.hints.put(SVGHints.KEY_ELEMENT_ID, null); // clear it
+            if (this.elementIDs.contains(elementID)) {
+                throw new IllegalStateException("The element id " 
+                        + elementID + " is already used.");
+            } else {
+                this.elementIDs.add(elementID);
+            }
+            this.sb.append("id=\"").append(elementID).append("\" ");
+        }
+    }
+    
+    /**
      * Draws the specified shape with the current <code>paint</code> and 
      * <code>stroke</code>.  There is direct handling for <code>Line2D</code>, 
      * <code>Rectangle2D</code> and <code>Path2D</code>. All other shapes are
      * mapped to a <code>GeneralPath</code> and then drawn (effectively as 
-     * </code>Path2D</code> objects).
+     * <code>Path2D</code> objects).
      * 
      * @param s  the shape (<code>null</code> not permitted).
      * 
@@ -672,7 +786,9 @@ public final class SVGGraphics2D extends Graphics2D {
     public void draw(Shape s) {
         if (s instanceof Line2D) {
             Line2D l = (Line2D) s;
-            this.sb.append("<line x1=\"").append(geomDP(l.getX1()))
+            this.sb.append("<line ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("x1=\"").append(geomDP(l.getX1()))
                     .append("\" y1=\"").append(geomDP(l.getY1()))
                     .append("\" x2=\"").append(geomDP(l.getX2()))
                     .append("\" y2=\"").append(geomDP(l.getY2()))
@@ -684,7 +800,9 @@ public final class SVGGraphics2D extends Graphics2D {
             this.sb.append("/>");
         } else if (s instanceof Rectangle2D) {
             Rectangle2D r = (Rectangle2D) s;
-            this.sb.append("<rect x=\"").append(geomDP(r.getX()))
+            this.sb.append("<rect ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("x=\"").append(geomDP(r.getX()))
                     .append("\" y=\"").append(geomDP(r.getY()))
                     .append("\" width=\"").append(geomDP(r.getWidth()))
                     .append("\" height=\"").append(geomDP(r.getHeight()))
@@ -697,7 +815,9 @@ public final class SVGGraphics2D extends Graphics2D {
             this.sb.append("/>");
         } else if (s instanceof Path2D) {
             Path2D path = (Path2D) s;
-            this.sb.append("<g style=\"").append(strokeStyle())
+            this.sb.append("<g ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("style=\"").append(strokeStyle())
                     .append("; fill: none").append("\" ");
             this.sb.append("transform=\"").append(getSVGTransform(
                     this.transform)).append("\" ");
@@ -727,7 +847,9 @@ public final class SVGGraphics2D extends Graphics2D {
             if (r.isEmpty()) {
                 return;
             }
-            this.sb.append("<rect x=\"").append(geomDP(r.getX()))
+            this.sb.append("<rect ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("x=\"").append(geomDP(r.getX()))
                     .append("\" y=\"").append(geomDP(r.getY()))
                     .append("\" width=\"").append(geomDP(r.getWidth()))
                     .append("\" height=\"").append(geomDP(r.getHeight()))
@@ -739,7 +861,9 @@ public final class SVGGraphics2D extends Graphics2D {
             this.sb.append("/>");
         } else if (s instanceof Path2D) {
             Path2D path = (Path2D) s;
-            this.sb.append("<g style=\"").append(getSVGFillStyle());
+            this.sb.append("<g ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("style=\"").append(getSVGFillStyle());
             this.sb.append("; stroke: none").append("\" ");
             this.sb.append("transform=\"").append(getSVGTransform(
                     this.transform)).append("\" ");
@@ -929,6 +1053,33 @@ public final class SVGGraphics2D extends Graphics2D {
     }
     
     /**
+     * Returns the font mapper (an object that optionally maps font family
+     * names to alternates).  The default mapper will convert Java logical 
+     * font names to the equivalent SVG generic font name, and leave all other
+     * font names unchanged.
+     * 
+     * @return The font mapper (never <code>null</code>).
+     * 
+     * @see #setFontMapper(org.jfree.graphics2d.svg.FontMapper) 
+     * @since 1.5
+     */
+    public FontMapper getFontMapper() {
+        return this.fontMapper;
+    }
+    
+    /**
+     * Sets the font mapper.
+     * 
+     * @param mapper  the font mapper (<code>null</code> not permitted).
+     * 
+     * @since 1.5
+     */
+    public void setFontMapper(FontMapper mapper) {
+        Args.nullNotPermitted(mapper, "mapper");
+        this.fontMapper = mapper;
+    }
+    
+    /**
      * Returns a string containing font style info.
      * 
      * @return A string containing font style info.
@@ -936,7 +1087,8 @@ public final class SVGGraphics2D extends Graphics2D {
     private String getSVGFontStyle() {
         StringBuilder b = new StringBuilder();
         b.append("fill: ").append(getSVGColor()).append("; ");
-        b.append("font-family: ").append(this.font.getFamily()).append("; ");
+        String fontFamily = this.fontMapper.mapFont(this.font.getFamily());
+        b.append("font-family: ").append(fontFamily).append("; ");
         b.append("font-size: ").append(this.font.getSize()).append("px; ");
         if (this.font.isBold()) {
             b.append("font-weight: bold; ");
@@ -1021,7 +1173,7 @@ public final class SVGGraphics2D extends Graphics2D {
                 .append("\" ");
         this.sb.append(getClipPathRef());
         this.sb.append(">");
-        this.sb.append(str).append("</text>");
+        this.sb.append(SVGUtils.escapeForXML(str)).append("</text>");
         this.sb.append("</g>");
     }
 
@@ -1148,7 +1300,7 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * Applies a shear transformation. This is equivalent to the following 
      * call to the <code>transform</code> method:
-     * <p>
+     * <br><br>
      * <ul><li>
      * <code>transform(AffineTransform.getShearInstance(shx, shy));</code>
      * </ul>
@@ -1705,7 +1857,9 @@ public final class SVGGraphics2D extends Graphics2D {
         // referenced...
         Object hint = this.getRenderingHint(SVGHints.KEY_IMAGE_HANDLING);
         if (SVGHints.VALUE_IMAGE_HANDLING_EMBED.equals(hint)) {
-            this.sb.append("<image preserveAspectRatio=\"none\" ");
+            this.sb.append("<image ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("preserveAspectRatio=\"none\" ");
             this.sb.append("xlink:href=\"data:image/png;base64,");
             this.sb.append(DatatypeConverter.printBase64Binary(getPNGBytes(
                     img)));
@@ -1721,12 +1875,20 @@ public final class SVGGraphics2D extends Graphics2D {
             return true;
         } else { // here for SVGHints.VALUE_IMAGE_HANDLING_REFERENCE
             int count = this.imageElements.size();
-            String fileName = "image-" + count + ".png";
-            ImageElement imageElement = new ImageElement(fileName, img);
+            String href = (String) this.hints.get(SVGHints.KEY_IMAGE_HREF);
+            if (href == null) {
+                href = this.filePrefix + count + this.fileSuffix;
+            } else {
+                // KEY_IMAGE_HREF value is for a single use...
+                this.hints.put(SVGHints.KEY_IMAGE_HREF, null);
+            }
+            ImageElement imageElement = new ImageElement(href, img);
             this.imageElements.add(imageElement);
             // write an SVG element for the img
-            this.sb.append("<image xlink:href=\"");
-            this.sb.append(fileName).append("\" ");
+            this.sb.append("<image ");
+            appendOptionalElementIDFromHint(this.sb);
+            this.sb.append("xlink:href=\"");
+            this.sb.append(href).append("\" ");
             this.sb.append(getClipPathRef()).append(" ");
             this.sb.append("transform=\"").append(getSVGTransform(
                     this.transform)).append("\" ");

@@ -64,6 +64,7 @@ import java.awt.image.RenderedImage;
 import java.awt.image.renderable.RenderableImage;
 import java.text.AttributedCharacterIterator;
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.Map;
 import org.jfree.graphics2d.Args;
 import org.jfree.graphics2d.GraphicsUtils;
@@ -157,7 +158,7 @@ public final class CanvasGraphics2D extends Graphics2D {
     /**
      * The decimal formatter for transform matrices.
      */
-    private DecimalFormat transformFormat = new DecimalFormat("0.######");
+    private DecimalFormat transformFormat;
     
     /**
      * The number of decimal places to use when writing coordinates for
@@ -182,6 +183,10 @@ public final class CanvasGraphics2D extends Graphics2D {
         this.hints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, 
                 RenderingHints.VALUE_ANTIALIAS_ON);
         this.clip = null;
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
+        this.transformFormat = new DecimalFormat("0.######", dfs);
+        this.geometryFormat = new DecimalFormat("0.##", dfs);
     }
 
     /**
@@ -214,7 +219,7 @@ public final class CanvasGraphics2D extends Graphics2D {
      * matrices in the Javascript output.  Values in the range 1 to 10 will be 
      * used to configure a formatter to that number of decimal places, for all 
      * other values we revert to the normal <code>String</code> conversion of 
-     * <coode>double</code> primitives (approximately 16 decimals places).
+     * <code>double</code> primitives (approximately 16 decimals places).
      * <p>
      * Note that there is a separate attribute to control the number of decimal
      * places for geometrical elements in the output (see 
@@ -230,8 +235,10 @@ public final class CanvasGraphics2D extends Graphics2D {
             this.transformFormat = null;
             return;
         }
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
         this.transformFormat = new DecimalFormat("0." 
-                + "##########".substring(0, dp));
+                + "##########".substring(0, dp), dfs);
     }
     
     /**
@@ -267,8 +274,10 @@ public final class CanvasGraphics2D extends Graphics2D {
             this.geometryFormat = null;
             return;
         }
+        DecimalFormatSymbols dfs = new DecimalFormatSymbols();
+        dfs.setDecimalSeparator('.');
         this.geometryFormat = new DecimalFormat("0." 
-                + "##########".substring(0, dp));
+                + "##########".substring(0, dp), dfs);
     }
     
     /**
@@ -600,7 +609,7 @@ public final class CanvasGraphics2D extends Graphics2D {
      * <code>stroke</code>.  There is direct handling for <code>Line2D</code>, 
      * <code>Rectangle2D</code> and <code>Path2D</code>. All other shapes are
      * mapped to a <code>GeneralPath</code> and then drawn (effectively as 
-     * </code>Path2D</code> objects).
+     * <code>Path2D</code> objects).
      * 
      * @param s  the shape (<code>null</code> not permitted).
      * 
@@ -918,7 +927,7 @@ public final class CanvasGraphics2D extends Graphics2D {
     /**
      * Applies a shear transformation. This is equivalent to the following 
      * call to the <code>transform</code> method:
-     * <p>
+     * <br><br>
      * <ul><li>
      * <code>transform(AffineTransform.getShearInstance(shx, shy));</code>
      * </ul>
@@ -1026,7 +1035,7 @@ public final class CanvasGraphics2D extends Graphics2D {
     /**
      * Not yet implemented.
      * 
-     * @param c1 
+     * @param c1  the color.
      */
     @Override
     public void setXORMode(Color c1) {
@@ -1144,12 +1153,12 @@ public final class CanvasGraphics2D extends Graphics2D {
     /**
      * Not yet implemented.
      * 
-     * @param x
-     * @param y
-     * @param width
-     * @param height
-     * @param dx
-     * @param dy 
+     * @param x  the x-coordinate.
+     * @param y  the y-coordinate.
+     * @param width  the width.
+     * @param height  the height.
+     * @param dx  the destination x-offset.
+     * @param dy  the destination y-offset.
      */
     @Override
     public void copyArea(int x, int y, int width, int height, int dx, int dy) {
@@ -1463,12 +1472,12 @@ public final class CanvasGraphics2D extends Graphics2D {
     /**
      * Not yet supported (but no exception is thrown).
      * 
-     * @param img
-     * @param x
-     * @param y
-     * @param width
-     * @param height
-     * @param observer
+     * @param img  the image.
+     * @param x  the x-coordinate.
+     * @param y  the y-coordinate.
+     * @param width  the width.
+     * @param height  the height.
+     * @param observer  the observer (<code>null</code> permitted).
      * 
      * @return A boolean. 
      */
