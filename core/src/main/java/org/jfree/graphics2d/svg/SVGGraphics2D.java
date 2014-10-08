@@ -66,7 +66,6 @@ import java.awt.image.RenderedImage;
 import java.awt.image.renderable.RenderableImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.text.AttributedCharacterIterator;
 import java.text.AttributedCharacterIterator.Attribute;
 import java.text.DecimalFormat;
@@ -86,19 +85,32 @@ import org.jfree.graphics2d.RadialGradientPaintKey;
  * A <code>Graphics2D</code> implementation that creates SVG output.  After 
  * rendering the graphics via the <code>SVGGraphics2D</code>, you can retrieve
  * an SVG element (see {@link #getSVGElement()}) or an SVG document (see 
- * {@link #getSVGDocument()}).
+ * {@link #getSVGDocument()}) containing your content.
  * <p>
- * <b>Usage</b>
+ * <b>Usage</b><br>
+ * Using the <code>SVGGraphics2D</code> class is straightforward.  First, 
+ * create an instance specifying the height and width of the SVG element that 
+ * will be created.  Then, use standard Java2D API calls to draw content 
+ * into the element.  Finally, retrieve the SVG element that has been 
+ * accumulated.  For example:
  * <p>
- * <code>SVGGraphics2D g2 = new SVGGraphics2D(300, 200);<br></code>
- * <code>g2.setPaint(Color.RED);<br></code>
- * <code>g2.draw(new Rectangle(10, 10, 280, 180);<br></code>
- * <code>String svgElement = g2.getSVGElement();<br></code>
+ * <code>&nbsp;&nbsp;&nbsp;&nbsp;SVGGraphics2D g2 = new SVGGraphics2D(300, 200);<br></code>
+ * <code>&nbsp;&nbsp;&nbsp;&nbsp;g2.setPaint(Color.RED);<br></code>
+ * <code>&nbsp;&nbsp;&nbsp;&nbsp;g2.draw(new Rectangle(10, 10, 280, 180);<br></code>
+ * <code>&nbsp;&nbsp;&nbsp;&nbsp;String svgElement = g2.getSVGElement();<br></code>
  * <p>
- * Some implementation notes:
+ * For the content generation step, you can make use of third party libraries,
+ * such as <a href="http://www.jfree.org/jfreechart/">JFreeChart</a>, that 
+ * render output using standard Java2D API calls.
  * <p>
+ * <b>Rendering Hints</b><br>
+ * The <code>SVGGraphics2D</code> supports a couple of custom rendering hints -  
+ * for details, refer to the {@link SVGHints} class documentation.
+ * <p>
+ * <b>Other Notes</b><br>
+ * Some additional notes:
  * <ul>
- * 
+ *
  * <li>Images are supported, but for methods with an <code>ImageObserver</code>
  * parameter note that the observer is ignored completely.  In any case, using 
  * images that are not fully loaded already would not be a good idea in the 
@@ -114,8 +126,8 @@ import org.jfree.graphics2d.RadialGradientPaintKey;
  * write the coordinates for geometrical elements (default 2dp) and transform
  * matrices (default 6dp).  These defaults may change in a future release.</li>
  * </ul>
- * <p>
- * For some demos of the use of this class, please look in the
+ *
+ * For some demos showing how to use this class, look in the
  * <code>org.jfree.graphics2d.demo</code> package in the <code>src</code>
  * directory.
  */
@@ -151,7 +163,7 @@ public final class SVGGraphics2D extends Graphics2D {
     private DecimalFormat geometryFormat = new DecimalFormat("0.##");
     
     /** The buffer that accumulates the SVG output. */
-    private AppendableWithoutException sb;
+    private StringBuilder sb;
 
     /** 
      * A map of all the gradients used, and the corresponding id.  When 
@@ -252,24 +264,6 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     private GraphicsConfiguration deviceConfiguration;
 
-
-
-    private SVGGraphics2D(int width, int height, AppendableWithoutException appendable) {
-        this.width = width;
-        this.height = height;
-        this.clip = null;
-        this.imageElements = new ArrayList<ImageElement>();
-        this.sb = appendable;
-        this.hints = new RenderingHints(SVGHints.KEY_IMAGE_HANDLING,
-                SVGHints.VALUE_IMAGE_HANDLING_EMBED);
-        sb.append("<svg ")
-                .append("xmlns=\"http://www.w3.org/2000/svg\" ")
-                .append("xmlns:xlink=\"http://www.w3.org/1999/xlink\" ")
-                .append("width=\"").append(width)
-                .append("\" height=\"").append(height).append("\">\n");
-
-    }
-
     /**
      * Creates a new instance with the specified width and height.
      * 
@@ -277,17 +271,13 @@ public final class SVGGraphics2D extends Graphics2D {
      * @param height  the height of the SVG element.
      */
     public SVGGraphics2D(int width, int height) {
-        this(width, height, new AppendableStringBuilder(new StringBuilder()));
-    }
-
-    /**
-     * Creates a new instance with the specified width and height.
-     *
-     * @param width  the width of the SVG element.
-     * @param height  the height of the SVG element.
-     */
-    public SVGGraphics2D(int width, int height, OutputStream outputStream) {
-        this(width, height, new AppendableOutputStream(outputStream));
+        this.width = width;
+        this.height = height;
+        this.clip = null;
+        this.imageElements = new ArrayList<ImageElement>();
+        this.sb = new StringBuilder();
+        this.hints = new RenderingHints(SVGHints.KEY_IMAGE_HANDLING, 
+                SVGHints.VALUE_IMAGE_HANDLING_EMBED);
     }
 
     /**
@@ -947,7 +937,7 @@ public final class SVGGraphics2D extends Graphics2D {
         StringBuilder b = new StringBuilder();
         b.append("fill: ").append(getSVGColor()).append("; ");
         b.append("font-family: ").append(this.font.getFamily()).append("; ");
-        b.append("font-size: ").append(this.font.getSize()).append("; ");
+        b.append("font-size: ").append(this.font.getSize()).append("px; ");
         if (this.font.isBold()) {
             b.append("font-weight: bold; ");
         }
@@ -984,6 +974,9 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * Draws a string at <code>(x, y)</code>.  The start of the text at the
      * baseline level will be aligned with the <code>(x, y)</code> point.
+     * <br><br>
+     * Note that you can make use of the {@link SVGHints#KEY_TEXT_RENDERING} 
+     * hint when drawing strings (this is completely optional though). 
      * 
      * @param str  the string (<code>null</code> not permitted).
      * @param x  the x-coordinate.
@@ -999,6 +992,9 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * Draws a string at <code>(x, y)</code>. The start of the text at the
      * baseline level will be aligned with the <code>(x, y)</code> point.
+     * <br><br>
+     * Note that you can make use of the {@link SVGHints#KEY_TEXT_RENDERING} 
+     * hint when drawing strings (this is completely optional though). 
      * 
      * @param str  the string (<code>null</code> not permitted).
      * @param x  the x-coordinate.
@@ -1015,7 +1011,14 @@ public final class SVGGraphics2D extends Graphics2D {
         this.sb.append("<text x=\"").append(geomDP(x))
                 .append("\" y=\"").append(geomDP(y))
                 .append("\"");
-        this.sb.append(" style=\"").append(getSVGFontStyle()).append("\" ");
+        this.sb.append(" style=\"").append(getSVGFontStyle()).append("\"");
+        String textRenderValue = "auto";
+        Object hintValue = getRenderingHint(SVGHints.KEY_TEXT_RENDERING);
+        if (hintValue != null) {
+            textRenderValue = hintValue.toString();
+        }
+        this.sb.append(" text-rendering=\"").append(textRenderValue)
+                .append("\" ");
         this.sb.append(getClipPathRef());
         this.sb.append(">");
         this.sb.append(str).append("</text>");
@@ -1025,7 +1028,7 @@ public final class SVGGraphics2D extends Graphics2D {
     /**
      * Draws a string of attributed characters at <code>(x, y)</code>.  The 
      * call is delegated to 
-     * {@link #drawString(java.text.AttributedCharacterIterator, float, float)}. 
+     * {@link #drawString(AttributedCharacterIterator, float, float)}. 
      * 
      * @param iterator  an iterator for the characters.
      * @param x  the x-coordinate.
@@ -1049,16 +1052,18 @@ public final class SVGGraphics2D extends Graphics2D {
             float y) {
         Set<Attribute> s = iterator.getAllAttributeKeys();
         if (!s.isEmpty()) {
-            TextLayout layout = new TextLayout(iterator, getFontRenderContext());
+            TextLayout layout = new TextLayout(iterator, 
+                    getFontRenderContext());
             layout.draw(this, x, y);
         } else {
-            StringBuilder sb = new StringBuilder();
+            StringBuilder strb = new StringBuilder();
             iterator.first();
-            for (int i = iterator.getBeginIndex(); i < iterator.getEndIndex(); i++) {
-                sb.append(iterator.current());
+            for (int i = iterator.getBeginIndex(); i < iterator.getEndIndex(); 
+                    i++) {
+                strb.append(iterator.current());
                 iterator.next();
             }
-            drawString(sb.toString(), x, y);
+            drawString(strb.toString(), x, y);
         }
     }
 
@@ -1934,14 +1939,19 @@ public final class SVGGraphics2D extends Graphics2D {
 
     /**
      * Returns the SVG element that has been generated by calls to this 
-     * Graphics2D implementation. Not compatible with OutputStream constructor.
+     * Graphics2D implementation.
      * 
      * @return The SVG element.
      */
     public String getSVGElement() {
+        StringBuilder svg = new StringBuilder("<svg ")
+                .append("xmlns=\"http://www.w3.org/2000/svg\" ")
+                .append("xmlns:xlink=\"http://www.w3.org/1999/xlink\" ")
+                .append("width=\"").append(width)
+                .append("\" height=\"").append(height).append("\">\n");
         StringBuilder defs = new StringBuilder("<defs>");
         for (GradientPaintKey key : this.gradientPaints.keySet()) {
-            defs.append(getLinearGradientElement(this.gradientPaints.get(key),
+            defs.append(getLinearGradientElement(this.gradientPaints.get(key), 
                     key.getPaint()));
             defs.append("\n");
         }
@@ -1958,21 +1968,15 @@ public final class SVGGraphics2D extends Graphics2D {
             defs.append(b.toString());
         }
         defs.append("</defs>\n");
-        sb.append(defs);
-        sb.append("</svg>");
-        return sb.toString();
-    }
-
-    /**
-     * Write
-     */
-    public void finalizeDocument() {
-
+        svg.append(defs);
+        svg.append(this.sb);
+        svg.append("</svg>");        
+        return svg.toString();
     }
     
     /**
      * Returns an SVG document.
-     *  Not compatible with OutputStream constructor.
+     * 
      * @return An SVG document.
      */
     public String getSVGDocument() {
