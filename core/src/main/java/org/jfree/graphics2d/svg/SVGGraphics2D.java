@@ -2,7 +2,7 @@
  * JFreeSVG : an SVG library for the Java(tm) platform
  * ===================================================
  * 
- * (C)opyright 2013, by Object Refinery Limited.  All rights reserved.
+ * (C)opyright 2013, 2014, by Object Refinery Limited.  All rights reserved.
  *
  * Project Info:  http://www.jfree.org/jfreesvg/index.html
  * 
@@ -22,6 +22,11 @@
  * [Oracle and Java are registered trademarks of Oracle and/or its affiliates. 
  * Other names may be trademarks of their respective owners.]
  * 
+ * If you do not wish to be bound by the terms of the AGPL, an alternative
+ * commercial license can be purchased.  For details, please see visit the
+ * JFreeSVG home page:
+ * 
+ * http://www.jfree.org/jfreesvg
  */
 
 package org.jfree.graphics2d.svg;
@@ -711,7 +716,22 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     @Override
     public void setRenderingHint(RenderingHints.Key hintKey, Object hintValue) {
-        this.hints.put(hintKey, hintValue);
+        // KEY_BEGIN_GROUP and KEY_END_GROUP are handled as special cases that
+        // never get stored in the hints map...
+        if (hintKey.equals(SVGHints.KEY_BEGIN_GROUP)) {
+            String groupId = (String) hintValue;
+            if (this.elementIDs.contains(groupId)) {
+                throw new IllegalArgumentException("The group id (" + groupId 
+                        + ") is not unique.");
+            } else {
+                this.sb.append("<g id=\"").append(groupId).append("\">");
+                this.elementIDs.add(groupId);
+            }
+        } else if (hintKey.equals(SVGHints.KEY_END_GROUP)) {
+            this.sb.append("</g>");
+        } else {
+            this.hints.put(hintKey, hintValue);
+        }
     }
 
     /**
@@ -958,10 +978,10 @@ public final class SVGGraphics2D extends Graphics2D {
      * 
      * @return An SVG color string. 
      */
-    private String getSVGColor() {
+    private String svgColorStr() {
         String result = "black;";
         if (this.paint instanceof Color) {
-            return getSVGColor((Color) this.paint);
+            return rgbaColorStr((Color) this.paint);
         } else if (this.paint instanceof GradientPaint 
                 || this.paint instanceof RadialGradientPaint) {
             return "url(#" + this.gradientPaintRef + ")";
@@ -976,10 +996,27 @@ public final class SVGGraphics2D extends Graphics2D {
      * 
      * @return The SVG RGB color string.
      */
-    private String getSVGColor(Color c) {
+    private String rgbColorStr(Color c) {
         StringBuilder b = new StringBuilder("rgb(");
         b.append(c.getRed()).append(",").append(c.getGreen()).append(",")
                 .append(c.getBlue()).append(")");
+        return b.toString();
+    }
+    
+    /**
+     * Returns a string representing the specified color in RGBA format.
+     * 
+     * @param c  the color (<code>null</code> not permitted).
+     * 
+     * @return The SVG RGBA color string.
+     */
+    private String rgbaColorStr(Color c) {
+        StringBuilder b = new StringBuilder("rgba(");
+        double alphaPercent = c.getAlpha() / 255.0;
+        b.append(c.getRed()).append(",").append(c.getGreen()).append(",")
+                .append(c.getBlue());
+        b.append(",").append(transformDP(alphaPercent));
+        b.append(")");
         return b.toString();
     }
     
@@ -999,7 +1036,7 @@ public final class SVGGraphics2D extends Graphics2D {
         }
         StringBuilder b = new StringBuilder();
         b.append("stroke-width: ").append(strokeWidth).append(";");
-        b.append("stroke: ").append(getSVGColor()).append(";");
+        b.append("stroke: ").append(svgColorStr()).append(";");
         b.append("stroke-opacity: ").append(getAlpha()).append(";");
         if (dashArray != null && dashArray.length != 0) {
             b.append("stroke-dasharray: ");
@@ -1020,7 +1057,7 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     private String getSVGFillStyle() {
         StringBuilder b = new StringBuilder();
-        b.append("fill: ").append(getSVGColor()).append(";");
+        b.append("fill: ").append(svgColorStr()).append(";");
         b.append("fill-opacity: ").append(getAlpha());
         return b.toString();
     }
@@ -1086,7 +1123,7 @@ public final class SVGGraphics2D extends Graphics2D {
      */
     private String getSVGFontStyle() {
         StringBuilder b = new StringBuilder();
-        b.append("fill: ").append(getSVGColor()).append("; ");
+        b.append("fill: ").append(svgColorStr()).append("; ");
         String fontFamily = this.fontMapper.mapFont(this.font.getFamily());
         b.append("font-family: ").append(fontFamily).append("; ");
         b.append("font-size: ").append(this.font.getSize()).append("px; ");
@@ -1158,6 +1195,7 @@ public final class SVGGraphics2D extends Graphics2D {
             throw new NullPointerException("Null 'str' argument.");
         }
         this.sb.append("<g ");
+        appendOptionalElementIDFromHint(this.sb);
         this.sb.append("transform=\"").append(getSVGTransform(
                     this.transform)).append("\">");
         this.sb.append("<text x=\"").append(geomDP(x))
@@ -1852,7 +1890,7 @@ public final class SVGGraphics2D extends Graphics2D {
     @Override
     public boolean drawImage(Image img, int x, int y, int w, int h, 
             ImageObserver observer) {
-        
+
         // the rendering hints control whether the image is embedded or
         // referenced...
         Object hint = this.getRenderingHint(SVGHints.KEY_IMAGE_HANDLING);
@@ -2101,7 +2139,7 @@ public final class SVGGraphics2D extends Graphics2D {
 
     /**
      * Returns the SVG element that has been generated by calls to this 
-     * Graphics2D implementation.
+     * <code>Graphics2D</code> implementation.
      * 
      * @return The SVG element.
      */
@@ -2198,9 +2236,9 @@ public final class SVGGraphics2D extends Graphics2D {
         b.append("x2=\"").append(h ? "100%" : "50%").append("\" ");
         b.append("y2=\"").append(v ? "100%" : "50%").append("\">");
         b.append("<stop offset=\"0%\" style=\"stop-color: ").append(
-                getSVGColor(paint.getColor1())).append(";\"/>");
+                rgbColorStr(paint.getColor1())).append(";\"/>");
         b.append("<stop offset=\"100%\" style=\"stop-color: ").append(
-                getSVGColor(paint.getColor2())).append(";\"/>");
+                rgbColorStr(paint.getColor2())).append(";\"/>");
         return b.append("</linearGradient>").toString();
     }
     
@@ -2231,7 +2269,7 @@ public final class SVGGraphics2D extends Graphics2D {
             Color c = colors[i];
             float f = fractions[i];
             b.append("<stop offset=\"").append(geomDP(f * 100)).append("%\" ");
-            b.append("stop-color=\"").append(getSVGColor(c)).append("\"/>");
+            b.append("stop-color=\"").append(rgbColorStr(c)).append("\"/>");
         }
         return b.append("</radialGradient>").toString();
     }
